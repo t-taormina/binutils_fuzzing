@@ -1,14 +1,14 @@
-import glob, subprocess, random, time, threading
+import glob, subprocess, random, time, threading, os, hashlib
 
 # Run one fuzz case with the provided input which is a byte array
-def fuzz(thr_id, input):
-    assert isinstance(input, bytearray)
+def fuzz(thr_id, inp):
+    assert isinstance(inp, bytearray)
     assert isinstance(thr_id, int)
 
     # Write out input to temporary file
     tmpfn = f"tmpinput{thr_id}"
     with open(tmpfn, "wb") as fd:
-        fd.write(input)
+        fd.write(inp)
 
     # Run objdump to completion
     sp = subprocess.Popen(["./objdump", "-x", tmpfn],
@@ -19,6 +19,13 @@ def fuzz(thr_id, input):
     # Assert that the program ran successfully
     if return_code != 0:
         print(f"Exited with {return_code}")
+
+        if return_code == -11: 
+            # SIGSEGV
+            dahash = hashlib.sha256(inp).hexdigest()
+            open(os.path.join("crashes", f"crash_{dahash:64}"),
+                              "wb").write(inp)
+            #print("SIGSEGV") 
 
 
 # Get a listing of all the files in the corpus.
@@ -51,10 +58,10 @@ def worker(thr_id):
         inp = bytearray(random.choice(corpus))
 
         for _ in range(random.randint(1, 8)):
-            inp[random.randint(0, len(inp))] = random.randint(0, 255)
+            inp[random.randint(0, len(inp) - 1)] = random.randint(0, 255)
 
         # Pick random input from corpus
-        fuzz(thr_id, random.choice(corpus))
+        fuzz(thr_id, inp)
 
         # Update the number of fuzz cases
         cases += 1
@@ -65,7 +72,8 @@ def worker(thr_id):
         # Determine fuzz cases per second
         fcps =  float(cases) / elapsed
 
-        print(f"[{elapsed:10.4}] cases {cases:10} |  fcps {fcps:10.4f}")
+        if thr_id == 0:
+            print(f"[{elapsed:10.4}] cases {cases:10} |  fcps {fcps:10.4f}")
 
 for thr_id in range(25):
     threading.Thread(target=worker, args=[thr_id]).start()
