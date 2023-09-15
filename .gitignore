@@ -4,3 +4,5 @@ binutils-2.14.tar.gz
 binutils-2.14/
 objdump_fuzzer/corpus/
 objdump_fuzzer/crashes/
+objdump_rust_fuzzer/target/
+objdump_rust_fuzzer/corpus/
