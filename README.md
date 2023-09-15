@@ -1,2 +1,2 @@
-# binutils fuzzing
+# objdump fuzzing
 - This repository contains code for fuzzing the objdump feature of binutils. For this, I have built a binutils from 2003 since this version will likely have a lot more bugs and it will be significantly less likely to find a relevant bug. This is strictly for my own educational purposes as it is the first fuzzer I have worked on. I am using gamozolabs as a resource. He has fantastic content on hacking and low-level programming on all major content platforms(youtube/twitch are what I am using). Currently the fuzzer is written in python, but I wll be working on a Rust version next.  
