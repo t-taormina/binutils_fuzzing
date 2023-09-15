@@ -1,7 +1,7 @@
 import glob, subprocess, random, time, threading, os, hashlib
 
 # Run one fuzz case with the provided input which is a byte array
-def fuzz(thr_id, inp):
+def fuzz(thr_id: int, inp: bytearray):
     assert isinstance(inp, bytearray)
     assert isinstance(thr_id, int)
 

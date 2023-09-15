@@ -1,4 +1,6 @@
-corpus/*
 tmp*
-objdump
-crashes/*
+objdump 
+binutils-2.14.tar.gz
+binutils-2.14/
+objdump_fuzzer/corpus/
+objdump_fuzzer/crashes/
