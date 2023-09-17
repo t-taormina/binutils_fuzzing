@@ -261,6 +261,7 @@ impl Emulator {
     }
 }
 
+/// Section information for a file
 struct Section {
     file_off: usize,
     virt_addr: VirtAddr,
