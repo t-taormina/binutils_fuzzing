@@ -1,4 +1,6 @@
 tmp*
+target
+test_app
 objdump 
 binutils-2.14.tar.gz
 binutils-2.14/
