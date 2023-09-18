@@ -5,6 +5,21 @@ const PERM_WRITE: u8 = 1 << 1;
 const PERM_EXEC: u8 = 1 << 2;
 const PERM_RAW: u8 = 1 << 3;
 
+pub unsafe trait Primitive: Default + Clone + Copy {}
+unsafe impl Primitive for u8 {}
+unsafe impl Primitive for u16 {}
+unsafe impl Primitive for u32 {}
+unsafe impl Primitive for u64 {}
+unsafe impl Primitive for u128 {}
+unsafe impl Primitive for usize {}
+
+unsafe impl Primitive for i8 {}
+unsafe impl Primitive for i16 {}
+unsafe impl Primitive for i32 {}
+unsafe impl Primitive for i64 {}
+unsafe impl Primitive for i128 {}
+unsafe impl Primitive for isize {}
+
 /// Block size used for resetting and tracking memory which has been modified
 /// The larger this is, the fewer but more expensive memcpys() need to occur,
 /// the smaller, the greater but less expensive memcpys() need to occur.
@@ -15,15 +30,15 @@ const DIRTY_BLOCK_SIZE: usize = 4096;
 /// permissions it has
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct Perm(u8);
+pub struct Perm(pub u8);
 
 /// A guest virtual address
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct VirtAddr(usize);
+pub struct VirtAddr(pub usize);
 
 /// An isolated memory space
-struct Mmu {
+pub struct Mmu {
     /// Block of memory for this address space
     /// Offset 0 corresponds to address 0 in the guest address space
     memory: Vec<u8>,
@@ -42,6 +57,7 @@ struct Mmu {
 }
 
 impl Mmu {
+    /// Create a new memory space which can hold 'size' bytes
     pub fn new(size: usize) -> Self {
         Mmu {
             memory: vec![0; size],
@@ -53,7 +69,7 @@ impl Mmu {
     }
 
     /// Fork from an existing MMU
-    pub fn fork(&self) -> Self {
+    fn fork(&self) -> Self {
         let size = self.memory.len();
         Mmu {
             memory: self.memory.clone(),
@@ -66,7 +82,7 @@ impl Mmu {
 
     /// Restores memory back to the original state (eg. restores all dirty
     /// blocks to the state of 'other')
-    pub fn reset(&mut self, other: &Mmu) {
+    fn reset(&mut self, other: &Mmu) {
         for &block in &self.dirty {
             // Get the start and end addresses of the dirtied memory
             let start = block * DIRTY_BLOCK_SIZE;
@@ -196,18 +212,42 @@ impl Mmu {
     pub fn read_into(&self, addr: VirtAddr, buf: &mut [u8]) -> Option<()> {
         self.read_into_perms(addr, buf, Perm(PERM_READ))
     }
+
+    /// Read a type 'T' at 'addr' expecting 'perms'
+    pub fn read<T: Primitive>(&mut self, addr: VirtAddr) -> Option<T> {
+        self.read_perms(addr, Perm(PERM_READ))
+    }
+
+    /// Read a type 'T' at 'addr' expecting 'perms'
+    pub fn read_perms<T: Primitive>(&mut self, addr: VirtAddr, perms: Perm) -> Option<T> {
+        let mut tmp = [0u8; 16];
+        self.read_into_perms(addr, &mut tmp[..core::mem::size_of::<T>()], perms)?;
+        Some(unsafe { core::ptr::read_unaligned(tmp.as_ptr() as *const T) })
+    }
+
+    /// Write a 'val' to 'addr'
+    pub fn write<T: Primitive>(&mut self, addr: VirtAddr, val: T) -> Option<()> {
+        let tmp = unsafe {
+            core::slice::from_raw_parts(&val as *const T as *const u8, core::mem::size_of::<T>())
+        };
+        self.write_from(addr, tmp)
+    }
 }
 
 /// All the state of the emulated system
-struct Emulator {
+pub struct Emulator {
     /// Memory for the emulator
     pub memory: Mmu,
+
+    /// All RV64i registers
+    registers: [u64; 33],
 }
 
 impl Emulator {
     pub fn new(size: usize) -> Self {
         Emulator {
             memory: Mmu::new(size),
+            registers: [0; 33],
         }
     }
 
@@ -215,6 +255,64 @@ impl Emulator {
     pub fn fork(&self) -> Self {
         Emulator {
             memory: self.memory.fork(),
+            registers: self.registers.clone(),
+        }
+    }
+
+    /// Reset the state of 'self' to 'other' assuming that 'self' is forked off
+    /// of 'other'. If it is not forked off 'other', the results are invalid
+    pub fn reset(&mut self, other: &Self) {
+        // Reset memory state
+        self.memory.reset(&other.memory);
+
+        // Reset register state
+        self.registers = other.registers;
+    }
+
+    /// Get a register from the guest
+    pub fn reg(&self, register: Register) -> u64 {
+        self.registers[register as usize]
+    }
+
+    /// Set a register in the guest
+    pub fn set_reg(&mut self, register: Register, value: u64) {
+        self.registers[register as usize] = value;
+    }
+
+    pub fn run(&mut self) -> Option<()> {
+        loop {
+            // Get the current program counter
+            let pc = self.reg(Register::Pc);
+            let inst: u32 = self
+                .memory
+                .read_perms(VirtAddr(pc as usize), Perm(PERM_EXEC))?;
+
+            // Extract 'opcode' from 'inst' (instruction)
+            let opcode = inst & 0b1111111;
+
+            match opcode {
+                0b0110111 => {
+                    // LUI (Load upper immediate)
+                    let inst = UType::from(inst);
+                    self.set_reg(inst.rd, inst.imm as i64 as u64);
+                }
+                0b0010111 => {
+                    // AUIPC (Add upper immediate PC)
+                    let inst = UType::from(inst);
+                    self.set_reg(inst.rd, (inst.imm as i64 as u64).wrapping_add(pc));
+                }
+                0b1101111 => {
+                    // JAL (Jump and Link)
+                    let inst = JType::from(inst);
+                    self.set_reg(inst.rd, (inst.imm as i64 as u64).wrapping_add(pc));
+                }
+                _ => unimplemented!("Unhandled opcode: {:#09b}\n", opcode),
+            }
+
+            // Update the pc to the next instruction
+            self.set_reg(Register::Pc, pc.wrapping_add(4));
+
+            print!("{:#x}\n", inst);
         }
     }
 
@@ -261,13 +359,95 @@ impl Emulator {
     }
 }
 
+#[derive(Debug)]
+struct JType {
+    imm: i32,
+    rd: Register,
+}
+
+impl From<u32> for JType {
+    fn from(inst: u32) -> Self {
+        let imm20 = (inst >> 31) & 1;
+        let imm101 = (inst >> 21) & 0b1111111111;
+        let imm11 = (inst >> 20) & 1;
+        let imm1912 = (inst >> 12) & 0b11111111;
+
+        let imm = imm20 << 20 | imm1912 << 12 | imm11 << 11 | imm101 << 1;
+        let imm = ((imm as i32) << 11) >> 11;
+        JType {
+            imm: imm,
+            rd: Register::from((inst >> 7) & 0b11111),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct UType {
+    imm: i32,
+    rd: Register,
+}
+
+impl From<u32> for UType {
+    fn from(inst: u32) -> Self {
+        UType {
+            imm: (inst & !0xfff) as i32,
+            rd: Register::from((inst >> 7) & 0b11111),
+        }
+    }
+}
+
 /// Section information for a file
-struct Section {
-    file_off: usize,
-    virt_addr: VirtAddr,
-    file_size: usize,
-    mem_size: usize,
-    permissions: Perm,
+pub struct Section {
+    pub file_off: usize,
+    pub virt_addr: VirtAddr,
+    pub file_size: usize,
+    pub mem_size: usize,
+    pub permissions: Perm,
+}
+
+/// 64b-t RISC-V registers
+#[derive(Clone, Copy, Debug)]
+#[repr(usize)]
+pub enum Register {
+    Zero = 0,
+    Ra,
+    Sp,
+    Gp,
+    Tp,
+    T0,
+    T1,
+    T2,
+    S0,
+    S1,
+    A0,
+    A1,
+    A2,
+    A3,
+    A4,
+    A5,
+    A6,
+    S2,
+    S3,
+    S4,
+    S5,
+    S6,
+    S7,
+    S8,
+    S9,
+    S10,
+    S11,
+    T3,
+    T4,
+    T5,
+    T6,
+    Pc,
+}
+
+impl From<u32> for Register {
+    fn from(val: u32) -> Self {
+        assert!(val < 32);
+        unsafe { core::ptr::read_unaligned(&(val as usize) as *const usize as *const Register) }
+    }
 }
 
 fn main() {
@@ -303,20 +483,7 @@ fn main() {
     // let tmp = emu.memory.allocate(4).unwrap();
     // emu.memory.write_from(tmp, b"asdf").unwrap();
 
-    {
-        let mut forked = emu.fork();
-        // forked.memory.write_from(tmp, b"AAAA").unwrap();
-        // let mut bytes = [0u8; 4];
-        // forked.memory.read_into(tmp, &mut bytes).unwrap();
-        // print!("Dirtied {:x?}\n", bytes);
-        // print!("After reset: {:x?}\n", bytes);
-        for _ in 0..100_000_000 {
-            let mut tmp = [0u8; 4];
-            emu.memory
-                .read_into_perms(VirtAddr(0x11190), &mut tmp, Perm(PERM_EXEC))
-                .unwrap();
-            print!("{:#02x?}\n", tmp);
-            forked.memory.reset(&emu.memory);
-        }
-    }
+    // Set the program entry point
+    emu.set_reg(Register::Pc, 0x11190);
+    emu.run().expect("Failed to execute emulator");
 }
