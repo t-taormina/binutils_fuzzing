@@ -271,12 +271,18 @@ impl Emulator {
 
     /// Get a register from the guest
     pub fn reg(&self, register: Register) -> u64 {
-        self.registers[register as usize]
+        if register != Register::Zero {
+            self.registers[register as usize]
+        } else {
+            0
+        }
     }
 
     /// Set a register in the guest
     pub fn set_reg(&mut self, register: Register, value: u64) {
-        self.registers[register as usize] = value;
+        if register != Register::Zero {
+            self.registers[register as usize] = value;
+        }
     }
 
     pub fn run(&mut self) -> Option<()> {
@@ -287,7 +293,7 @@ impl Emulator {
                 .memory
                 .read_perms(VirtAddr(pc as usize), Perm(PERM_EXEC))?;
 
-            // Extract 'opcode' from 'inst' (instruction)
+            // Extract opcode from instruction (Bits 0-6)
             let opcode = inst & 0b1111111;
 
             match opcode {
@@ -304,7 +310,92 @@ impl Emulator {
                 0b1101111 => {
                     // JAL (Jump and Link)
                     let inst = JType::from(inst);
-                    self.set_reg(inst.rd, (inst.imm as i64 as u64).wrapping_add(pc));
+                    self.set_reg(inst.rd, pc.wrapping_add(4));
+                    self.set_reg(Register::Pc, pc.wrapping_add(inst.imm as i64 as u64));
+                }
+                0b1100111 => {
+                    // JALR (Jump and Link Register)
+                    let inst = IType::from(inst);
+
+                    match inst.funct3 {
+                        0b000 => {
+                            let target = self.reg(inst.rs1).wrapping_add(inst.imm as i64 as u64);
+                            self.set_reg(inst.rd, pc.wrapping_add(4));
+                            self.set_reg(Register::Pc, target);
+                        }
+                        _ => unimplemented!("0b1100111"),
+                    }
+                }
+                0b1100011 => {
+                    // We know it's a BType
+                    let inst = BType::from(inst);
+
+                    let rs1 = self.reg(inst.rs1);
+                    let rs2 = self.reg(inst.rs2);
+                    match inst.funct3 {
+                        0b000 => {
+                            // BEQ (Branch Equal)
+                            if rs1 == rs2 {
+                                self.set_reg(Register::Pc, pc.wrapping_add(inst.imm as i64 as u64));
+                            }
+                        }
+                        0b001 => {
+                            // BNE (Branch Not Equal)
+                            if rs1 != rs2 {
+                                self.set_reg(Register::Pc, pc.wrapping_add(inst.imm as i64 as u64));
+                            }
+                        }
+                        0b100 => {
+                            // BLT (Branch if less than)
+                            if (rs1 as i64) < (rs2 as i64) {
+                                self.set_reg(Register::Pc, pc.wrapping_add(inst.imm as i64 as u64));
+                            }
+                        }
+                        0b101 => {
+                            // BGE (Branch if greater than or equal to)
+                            if (rs1 as i64) >= (rs2 as i64) {
+                                self.set_reg(Register::Pc, pc.wrapping_add(inst.imm as i64 as u64));
+                            }
+                        }
+                        0b110 => {
+                            // BLTU (Branch if less than unsigned)
+                            if (rs1 as u64) < (rs2 as u64) {
+                                self.set_reg(Register::Pc, pc.wrapping_add(inst.imm as i64 as u64));
+                            }
+                        }
+                        0b111 => {
+                            // BGEU (Branch if greater than or equal to unsigned)
+                            if (rs1 as u64) >= (rs2 as u64) {
+                                self.set_reg(Register::Pc, pc.wrapping_add(inst.imm as i64 as u64));
+                            }
+                        }
+
+                        _ => unimplemented!("0b1100111"),
+                    }
+                }
+                0b0000011 => {
+                    // We know it's an IType
+                    let inst = IType::from(inst);
+
+                    match inst.funct3 => {
+                        0b000 => {
+                            // LB (Load Byte)
+                        }
+                        0b001 => {
+                            // LH ()
+                        }
+                        0b010 => {
+                            // LW ()
+                        }
+                        0b100 => {
+                            // LBU ()
+                        }
+                        0b101 => {
+                            // LHU ()
+                        }
+
+                        
+                    }
                 }
                 _ => unimplemented!("Unhandled opcode: {:#09b}\n", opcode),
             }
@@ -360,6 +451,66 @@ impl Emulator {
 }
 
 #[derive(Debug)]
+struct BType {
+    imm: i32,
+    rs1: Register,
+    rs2: Register,
+    funct3: u32,
+}
+
+impl From<u32> for BType {
+    fn from(inst: u32) -> Self {
+        let imm105 = ((inst as i32) >> 25) & 0b111111;
+        let imm12 = ((inst as i32) >> 31) & 1;
+        let imm41 = ((inst as i32) >> 8) & 0b1111;
+        let imm11 = ((inst as i32) >> 7) & 1;
+
+        let imm = imm12 << 12 | imm11 << 11 | imm105 << 5 | imm41 << 1;
+        let imm = ((imm as i32) << 19) >> 19;
+
+        let rs1: Register = Register::from((inst >> 15) & 0b11111);
+
+        let rs2: Register = Register::from((inst >> 20) & 0b11111);
+
+        let funct3: u32 = (inst >> 12) & 0b111;
+
+        BType {
+            imm,
+            rs1,
+            rs2,
+            funct3,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct IType {
+    imm: i32,
+    rs1: Register,
+    funct3: u32,
+    rd: Register,
+}
+
+impl From<u32> for IType {
+    fn from(inst: u32) -> Self {
+        let imm = (inst as i32) >> 20;
+
+        let rs1: Register = Register::from((inst >> 15) & 0b11111);
+
+        let funct3: u32 = (inst >> 12) & 0b111;
+
+        let rd = Register::from((inst >> 7) & 0b11111);
+
+        IType {
+            imm,
+            rs1,
+            funct3,
+            rd,
+        }
+    }
+}
+
+#[derive(Debug)]
 struct JType {
     imm: i32,
     rd: Register,
@@ -375,7 +526,7 @@ impl From<u32> for JType {
         let imm = imm20 << 20 | imm1912 << 12 | imm11 << 11 | imm101 << 1;
         let imm = ((imm as i32) << 11) >> 11;
         JType {
-            imm: imm,
+            imm,
             rd: Register::from((inst >> 7) & 0b11111),
         }
     }
@@ -406,7 +557,7 @@ pub struct Section {
 }
 
 /// 64b-t RISC-V registers
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(usize)]
 pub enum Register {
     Zero = 0,
