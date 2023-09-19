@@ -295,8 +295,8 @@ impl Emulator {
 
             // Extract opcode from instruction (Bits 0-6)
             let opcode = inst & 0b1111111;
+            print!("PC: {:#x} | opcode: {:b}\n", pc, opcode);
 
-            print!("Executing {:#x} {:b}\n", pc, opcode);
             match opcode {
                 0b0110111 => {
                     // LUI (Load upper immediate)
@@ -323,6 +323,7 @@ impl Emulator {
                             // JALR (Jump and Link Register)
                             let target = self.reg(inst.rs1).wrapping_add(inst.imm as i64 as u64);
                             self.set_reg(inst.rd, pc.wrapping_add(4));
+                            print!("Target: {:#x?}\n", target);
                             self.set_reg(Register::Pc, target);
                             continue 'next_inst;
                         }
@@ -411,7 +412,7 @@ impl Emulator {
                             // LD (Load double word)
                             let mut tmp = [0u8; 8];
                             self.memory.read_into(addr, &mut tmp)?;
-                            self.set_reg(inst.rd, i64::from_le_bytes(tmp) as i16 as u64);
+                            self.set_reg(inst.rd, i64::from_le_bytes(tmp) as i64 as u64);
                         }
                         0b100 => {
                             // LBU (Load byte unsigned)
@@ -524,7 +525,7 @@ impl Emulator {
                                     let shamt = inst.imm & 0b111111;
                                     self.set_reg(inst.rd, rs1 >> shamt);
                                 }
-                                0b100000 => {
+                                0b010000 => {
                                     // SRAI
                                     let shamt = inst.imm & 0b111111;
                                     self.set_reg(inst.rd, ((rs1 as i64) >> shamt) as u64);
@@ -557,7 +558,7 @@ impl Emulator {
                             self.set_reg(inst.rd, rs1 << shamt);
                         }
                         (0b0000000, 0b010) => {
-                            // SLT (Shift less than)
+                            // SLT (Set less than)
                             if (rs1 as i64) < (rs2 as i64) {
                                 self.set_reg(inst.rd, 1);
                             } else {
@@ -565,7 +566,7 @@ impl Emulator {
                             }
                         }
                         (0b0000000, 0b011) => {
-                            // SLTU
+                            // SLTU (Set less than unsigned)
                             if (rs1 as u64) < (rs2 as u64) {
                                 self.set_reg(inst.rd, 1);
                             } else {
@@ -577,7 +578,7 @@ impl Emulator {
                             self.set_reg(inst.rd, rs1 ^ rs2);
                         }
                         (0b0000000, 0b101) => {
-                            // SRL
+                            // SRL (Shift right logical)
                             let shamt = rs2 & 0b111111;
                             self.set_reg(inst.rd, rs1 >> shamt);
                         }
@@ -644,12 +645,12 @@ impl Emulator {
                             let mode = (inst.imm >> 5) & 0b1111111;
 
                             match mode {
-                                0b0000000 => {
+                                0b000000 => {
                                     // SRLIW
                                     let shamt = inst.imm & 0b11111;
                                     self.set_reg(inst.rd, (rs1 >> shamt) as i32 as i64 as u64);
                                 }
-                                0b0100000 => {
+                                0b010000 => {
                                     // SRAIW
                                     let shamt = inst.imm & 0b11111;
                                     self.set_reg(inst.rd, ((rs1 as i32) >> shamt) as i64 as u64);
@@ -700,6 +701,7 @@ impl Emulator {
             // Update the pc to the next instruction
             self.set_reg(Register::Pc, pc.wrapping_add(4));
         }
+        // Some(())
     }
 
     /// Load a file into the emulators address space using the sections as described
@@ -755,8 +757,8 @@ struct BType {
 
 impl From<u32> for BType {
     fn from(inst: u32) -> Self {
-        let imm105 = ((inst as i32) >> 25) & 0b111111;
         let imm12 = ((inst as i32) >> 31) & 1;
+        let imm105 = ((inst as i32) >> 25) & 0b111111;
         let imm41 = ((inst as i32) >> 8) & 0b1111;
         let imm11 = ((inst as i32) >> 7) & 1;
 
@@ -971,7 +973,7 @@ fn main() {
                 virt_addr: VirtAddr(0x0000000000011190),
                 file_size: 0x0000000000002284,
                 mem_size: 0x0000000000002284,
-                permissions: Perm(PERM_READ | PERM_EXEC),
+                permissions: Perm(PERM_EXEC),
             },
             Section {
                 file_off: 0x0000000000002418,
