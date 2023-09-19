@@ -1,7 +1,3 @@
-pub mod emulator;
-pub mod mmu;
-pub mod primitive;
-
 use crate::emulator::{Emulator, Register};
 use crate::mmu::{Perm, Section, VirtAddr, PERM_EXEC, PERM_READ, PERM_WRITE};
 
@@ -51,9 +47,11 @@ fn main() {
 
     // Setup null terminated arg vectors
     let argv = emu.memory.allocate(8).expect("Failed to allocate argv");
+
+    // Setup the program name
     emu.memory
         .write_from(argv, b"test\0")
-        .expect("Failed to null terminate argv");
+        .expect("Failed to write program name");
 
     macro_rules! push {
         ($expr:expr) => {
@@ -65,6 +63,7 @@ fn main() {
         };
     }
 
+    // Setup initial program stack state
     push!(0u64); // Auxp
     push!(0u64); // Envp
     push!(0u64); // Argv end
