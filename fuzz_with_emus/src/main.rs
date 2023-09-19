@@ -286,7 +286,7 @@ impl Emulator {
     }
 
     pub fn run(&mut self) -> Option<()> {
-        loop {
+        'next_inst: loop {
             // Get the current program counter
             let pc = self.reg(Register::Pc);
             let inst: u32 = self
@@ -313,16 +313,18 @@ impl Emulator {
                     let inst = JType::from(inst);
                     self.set_reg(inst.rd, pc.wrapping_add(4));
                     self.set_reg(Register::Pc, pc.wrapping_add(inst.imm as i64 as u64));
+                    continue 'next_inst;
                 }
                 0b1100111 => {
-                    // JALR (Jump and Link Register)
                     let inst = IType::from(inst);
 
                     match inst.funct3 {
                         0b000 => {
+                            // JALR (Jump and Link Register)
                             let target = self.reg(inst.rs1).wrapping_add(inst.imm as i64 as u64);
                             self.set_reg(inst.rd, pc.wrapping_add(4));
                             self.set_reg(Register::Pc, target);
+                            continue 'next_inst;
                         }
                         _ => unimplemented!("unexpected 0b1100111"),
                     }
@@ -338,36 +340,42 @@ impl Emulator {
                             // BEQ (Branch Equal)
                             if rs1 == rs2 {
                                 self.set_reg(Register::Pc, pc.wrapping_add(inst.imm as i64 as u64));
+                                continue 'next_inst;
                             }
                         }
                         0b001 => {
                             // BNE (Branch Not Equal)
                             if rs1 != rs2 {
                                 self.set_reg(Register::Pc, pc.wrapping_add(inst.imm as i64 as u64));
+                                continue 'next_inst;
                             }
                         }
                         0b100 => {
                             // BLT (Branch if less than)
                             if (rs1 as i64) < (rs2 as i64) {
                                 self.set_reg(Register::Pc, pc.wrapping_add(inst.imm as i64 as u64));
+                                continue 'next_inst;
                             }
                         }
                         0b101 => {
                             // BGE (Branch if greater than or equal to)
                             if (rs1 as i64) >= (rs2 as i64) {
                                 self.set_reg(Register::Pc, pc.wrapping_add(inst.imm as i64 as u64));
+                                continue 'next_inst;
                             }
                         }
                         0b110 => {
                             // BLTU (Branch if less than unsigned)
                             if (rs1 as u64) < (rs2 as u64) {
                                 self.set_reg(Register::Pc, pc.wrapping_add(inst.imm as i64 as u64));
+                                continue 'next_inst;
                             }
                         }
                         0b111 => {
                             // BGEU (Branch if greater than or equal to unsigned)
                             if (rs1 as u64) >= (rs2 as u64) {
                                 self.set_reg(Register::Pc, pc.wrapping_add(inst.imm as i64 as u64));
+                                continue 'next_inst;
                             }
                         }
                         _ => unimplemented!("unexpected 0b1100111"),
@@ -399,6 +407,12 @@ impl Emulator {
                             self.memory.read_into(addr, &mut tmp)?;
                             self.set_reg(inst.rd, i32::from_le_bytes(tmp) as i64 as u64);
                         }
+                        0b011 => {
+                            // LD (Load double word)
+                            let mut tmp = [0u8; 8];
+                            self.memory.read_into(addr, &mut tmp)?;
+                            self.set_reg(inst.rd, i64::from_le_bytes(tmp) as i16 as u64);
+                        }
                         0b100 => {
                             // LBU (Load byte unsigned)
                             let mut tmp = [0u8; 1];
@@ -406,10 +420,16 @@ impl Emulator {
                             self.set_reg(inst.rd, u8::from_le_bytes(tmp) as u64);
                         }
                         0b101 => {
-                            // LHU ()
+                            // LHU (Load half-word unsigned)
                             let mut tmp = [0u8; 2];
                             self.memory.read_into(addr, &mut tmp)?;
                             self.set_reg(inst.rd, u16::from_le_bytes(tmp) as u64);
+                        }
+                        0b110 => {
+                            // LWU (Load word unsigned)
+                            let mut tmp = [0u8; 4];
+                            self.memory.read_into(addr, &mut tmp)?;
+                            self.set_reg(inst.rd, u32::from_le_bytes(tmp) as u64);
                         }
                         _ => unimplemented!("unexpected 0b0000011"),
                     }
@@ -434,6 +454,11 @@ impl Emulator {
                         0b010 => {
                             // SW (Store word)
                             let val = self.reg(inst.rs2) as u32;
+                            self.memory.write(addr, val)?;
+                        }
+                        0b011 => {
+                            // SD (Store double word)
+                            let val = self.reg(inst.rs2) as u64;
                             self.memory.write(addr, val)?;
                         }
                         _ => unimplemented!("unexpected 0b0100011"),
@@ -479,9 +504,16 @@ impl Emulator {
                             self.set_reg(inst.rd, rs1 & imm);
                         }
                         0b001 => {
-                            // SLLI
-                            let shamt = inst.imm & 0b111111;
-                            self.set_reg(inst.rd, rs1 << shamt);
+                            let mode = (inst.imm >> 6) & 0b111111;
+
+                            match mode {
+                                0b000000 => {
+                                    // SLLI
+                                    let shamt = inst.imm & 0b111111;
+                                    self.set_reg(inst.rd, rs1 << shamt);
+                                }
+                                _ => unreachable!(),
+                            }
                         }
                         0b101 => {
                             let mode = (inst.imm >> 6) & 0b111111;
@@ -542,19 +574,122 @@ impl Emulator {
                         }
                         (0b0000000, 0b100) => {
                             // XOR
-                            self.set_reg(inst.rd, rs1.wrapping_add(rs2));
+                            self.set_reg(inst.rd, rs1 ^ rs2);
                         }
                         (0b0000000, 0b101) => {
                             // SRL
+                            let shamt = rs2 & 0b111111;
+                            self.set_reg(inst.rd, rs1 >> shamt);
                         }
                         (0b0100000, 0b101) => {
                             // SRA
+                            let shamt = rs2 & 0b111111;
+                            self.set_reg(inst.rd, ((rs1 as i64) >> shamt) as u64);
                         }
                         (0b0000000, 0b110) => {
                             // OR
+                            self.set_reg(inst.rd, rs1 | rs2);
                         }
                         (0b0000000, 0b111) => {
                             // AND
+                            self.set_reg(inst.rd, rs1 & rs2);
+                        }
+                        _ => unimplemented!("unexpected 0b0110011"),
+                    }
+                }
+                0b0001111 => {
+                    let inst = IType::from(inst);
+
+                    match inst.funct3 {
+                        0b000 => {
+                            // FENCE
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                0b1110011 => {
+                    if inst == 0b00000000000000000000000001110011 {
+                        // ECALL
+                        panic!("SYSCALL")
+                    } else if inst == 0b00000000000100000000000001110011 {
+                        // EBREAK
+                        panic!("SYSCALL")
+                    } else {
+                        unreachable!();
+                    }
+                }
+                0b0011011 => {
+                    // IType
+                    let inst = IType::from(inst);
+                    let rs1 = self.reg(inst.rs1) as u32;
+                    let imm = inst.imm as u32;
+
+                    match inst.funct3 {
+                        0b000 => {
+                            // ADDIW
+                            self.set_reg(inst.rd, rs1.wrapping_add(imm) as i32 as i64 as u64);
+                        }
+                        0b001 => {
+                            let mode = (inst.imm >> 5) & 0b1111111;
+                            match mode {
+                                0b0000000 => {
+                                    // SLLIW
+                                    let shamt = inst.imm & 0b11111;
+                                    self.set_reg(inst.rd, (rs1 << shamt) as i32 as i64 as u64);
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        0b101 => {
+                            let mode = (inst.imm >> 5) & 0b1111111;
+
+                            match mode {
+                                0b0000000 => {
+                                    // SRLIW
+                                    let shamt = inst.imm & 0b11111;
+                                    self.set_reg(inst.rd, (rs1 >> shamt) as i32 as i64 as u64);
+                                }
+                                0b0100000 => {
+                                    // SRAIW
+                                    let shamt = inst.imm & 0b11111;
+                                    self.set_reg(inst.rd, ((rs1 as i32) >> shamt) as i64 as u64);
+                                }
+                                _ => unimplemented!("unexpected 0b101"),
+                            }
+                        }
+                        _ => unimplemented!("unexpected 0b0010011"),
+                    }
+                }
+                0b0111011 => {
+                    // RType
+                    let inst = RType::from(inst);
+
+                    let rs1 = self.reg(inst.rs1) as u32;
+                    let rs2 = self.reg(inst.rs2) as u32;
+
+                    match (inst.funct7, inst.funct3) {
+                        (0b0000000, 0b000) => {
+                            // ADDW
+                            self.set_reg(inst.rd, rs1.wrapping_add(rs2) as i32 as i64 as u64);
+                        }
+                        (0b0100000, 0b000) => {
+                            // SUBW
+                            self.set_reg(inst.rd, rs1.wrapping_sub(rs2) as i32 as i64 as u64);
+                        }
+                        (0b0000000, 0b001) => {
+                            // SLLW (Shift left logical)
+                            let shamt = rs2 & 0b11111;
+                            self.set_reg(inst.rd, (rs1 << shamt) as i32 as i64 as u64);
+                        }
+                        (0b0000000, 0b101) => {
+                            // SRLW
+                            let shamt = rs2 & 0b11111;
+                            self.set_reg(inst.rd, (rs1 >> shamt) as i32 as i64 as u64);
+                        }
+                        (0b0100000, 0b101) => {
+                            // SRAW
+                            let shamt = rs2 & 0b11111;
+                            self.set_reg(inst.rd, ((rs1 as i32) >> shamt) as i64 as u64);
                         }
                         _ => unimplemented!("unexpected 0b0110011"),
                     }
@@ -854,5 +989,35 @@ fn main() {
 
     // Set the program entry point
     emu.set_reg(Register::Pc, 0x11190);
+
+    // Setup a stack
+    let stack = emu
+        .memory
+        .allocate(32 * 1024)
+        .expect("Failed to allocate stack");
+    emu.set_reg(Register::Sp, stack.0 as u64 + 32 * 1024);
+
+    // Setup null terminated arg vectors
+    let argv = emu.memory.allocate(8).expect("Failed to allocate argv");
+    emu.memory
+        .write_from(argv, b"test\0")
+        .expect("Failed to null terminate argv");
+
+    macro_rules! push {
+        ($expr:expr) => {
+            let sp = emu.reg(Register::Sp) - core::mem::size_of_val(&$expr) as u64;
+            emu.memory
+                .write(VirtAddr(sp as usize), $expr)
+                .expect("Push failed");
+            emu.set_reg(Register::Sp, sp);
+        };
+    }
+
+    push!(0u64); // Auxp
+    push!(0u64); // Envp
+    push!(0u64); // Argv end
+    push!(argv.0); // Argv
+    push!(1u64); // Argc
+
     emu.run().expect("Failed to execute emulator");
 }
