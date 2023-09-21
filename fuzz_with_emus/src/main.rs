@@ -55,7 +55,7 @@ fn main() {
     // Setup the program name
     emu.memory
         .write_from(argv, b"test\0")
-        .expect("Failed to write program name");
+        .expect("Failed to null terminate argv");
 
     macro_rules! push {
         ($expr:expr) => {
@@ -74,5 +74,28 @@ fn main() {
     push!(argv.0); // Argv
     push!(1u64); // Argc
 
-    emu.run().expect("Failed to execute emulator");
+    let mut count = 0;
+
+    loop {
+        let vmexit = emu.run().expect("Failed to execute emulator");
+
+        match vmexit {
+            emulator::VmExit::Syscall => {
+                let num = emu.reg(Register::A7);
+
+                match num {
+                    96 => {
+                        emu.set_reg(Register::A0, 1337);
+                    }
+                    _ => {
+                        panic!("unhandled syscall {}\n", num)
+                    }
+                }
+                let pc = emu.reg(Register::Pc);
+                emu.set_reg(Register::Pc, pc.wrapping_add(4));
+                count += 1;
+                print!("\n\nloop counts: {}\n\n", count);
+            }
+        }
+    }
 }

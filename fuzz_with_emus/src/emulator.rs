@@ -2,6 +2,11 @@
 
 use crate::mmu::{Mmu, Perm, VirtAddr, PERM_EXEC};
 
+/// Reasons why the VM exited
+pub enum VmExit {
+    /// The VM exited due to a syscall instruction
+    Syscall,
+}
 /// All the state of the emulated system
 pub struct Emulator {
     /// Memory for the emulator
@@ -53,7 +58,7 @@ impl Emulator {
         }
     }
 
-    pub fn run(&mut self) -> Option<()> {
+    pub fn run(&mut self) -> Option<VmExit> {
         'next_inst: loop {
             // Get the current program counter
             let pc = self.reg(Register::Pc);
@@ -91,7 +96,6 @@ impl Emulator {
                             // JALR (Jump and Link Register)
                             let target = self.reg(inst.rs1).wrapping_add(inst.imm as i64 as u64);
                             self.set_reg(inst.rd, pc.wrapping_add(4));
-                            print!("Target: {:#x?}\n", target);
                             self.set_reg(Register::Pc, target);
                             continue 'next_inst;
                         }
@@ -379,7 +383,7 @@ impl Emulator {
                 0b1110011 => {
                     if inst == 0b00000000000000000000000001110011 {
                         // ECALL
-                        panic!("SYSCALL")
+                        return Some(VmExit::Syscall);
                     } else if inst == 0b00000000000100000000000001110011 {
                         // EBREAK
                         panic!("SYSCALL")
@@ -469,7 +473,6 @@ impl Emulator {
             // Update the pc to the next instruction
             self.set_reg(Register::Pc, pc.wrapping_add(4));
         }
-        // Some(())
     }
 }
 
@@ -649,6 +652,7 @@ pub enum Register {
     A4,
     A5,
     A6,
+    A7,
     S2,
     S3,
     S4,
