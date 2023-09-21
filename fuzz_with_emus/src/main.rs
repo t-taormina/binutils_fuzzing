@@ -1,3 +1,7 @@
+pub mod emulator;
+pub mod mmu;
+pub mod primitive;
+
 use crate::emulator::{Emulator, Register};
 use crate::mmu::{Perm, Section, VirtAddr, PERM_EXEC, PERM_READ, PERM_WRITE};
 
