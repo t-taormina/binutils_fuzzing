@@ -227,6 +227,7 @@ impl Mmu {
             }
         }
 
+        // Copy the memory
         buf.copy_from_slice(&self.memory[addr.0..addr.0 + buf.len()]);
 
         Ok(())
@@ -274,7 +275,7 @@ impl Mmu {
             self.write_from(
                 section.virt_addr,
                 contents.get(section.file_off..section.file_off.checked_add(section.file_size)?)?,
-            ).ok();
+            ).ok()?;
 
             // Write in any paddings with zeros
             if section.mem_size > section.file_size {
@@ -282,7 +283,7 @@ impl Mmu {
                 self.write_from(
                     VirtAddr(section.virt_addr.0.checked_add(section.file_size)?),
                     &padding,
-                ).ok();
+                ).ok()?;
             }
 
             // Demote permissions to originals

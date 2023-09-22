@@ -44,9 +44,8 @@ fn handle_syscall(emu: &mut Emulator) -> Result<(), VmExit> {
                 let data = emu.memory.peek_perms(VirtAddr(buf), len,
                     Perm(PERM_READ))?;
 
-                print!("{} {}\n", len, data.len());
                 if let Ok(st) = core::str::from_utf8(data) {
-                    print!("{}", st);
+                    print!("{:#}\n", st);
                 }
             }
             Ok(())

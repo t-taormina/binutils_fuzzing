@@ -88,7 +88,7 @@ impl Emulator {
 
             // Extract opcode from instruction (Bits 0-6)
             let opcode = inst & 0b1111111;
-            print!("PC: {:#x} | opcode: {:b}\n", pc, opcode);
+            //print!("PC: {:#x} | opcode: {:b}\n", pc, opcode);
 
             match opcode {
                 0b0110111 => {
