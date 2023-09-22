@@ -45,7 +45,7 @@ fn handle_syscall(emu: &mut Emulator) -> Result<(), VmExit> {
                     Perm(PERM_READ))?;
 
                 if let Ok(st) = core::str::from_utf8(data) {
-                    print!("{:#}\n", st);
+                    print!("{}", st);
                 }
             }
             Ok(())
@@ -66,7 +66,7 @@ fn main() {
             "./test_app",
             &[
                 Section {
-                    file_off: 0x0000000000000040,
+                    file_off: 0x0000000000000000,
                     virt_addr: VirtAddr(0x0000000000010000),
                     file_size: 0x0000000000000190,
                     mem_size: 0x0000000000000190,
@@ -141,5 +141,6 @@ fn main() {
             _ => break vmexit,
         }
     };
+
     print!("VM exited with: {:x?}\n", vmexit);
 }
