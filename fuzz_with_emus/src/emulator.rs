@@ -3,16 +3,30 @@
 use crate::mmu::{Mmu, Perm, VirtAddr, PERM_EXEC};
 
 /// Reasons why the VM exited
+#[derive(Clone, Copy, Debug)]
 pub enum VmExit {
+    /// The address requested was not in bounds of the guest memory space
+    AddressMiss(VirtAddr, usize),
+
+    /// A read or write memory request overflowed the address size
+    AddressIntegerOverflow,
+
+    /// The VM exited cleanly as requested by the VM
+    Exit,
+
+    /// A read of `VirtAddr` failed due to missing permissions 
+    ReadFault(VirtAddr),
+
     /// The VM exited due to a syscall instruction
     Syscall,
 
     /// An integer overflow occured during a syscall due to bad supplied arguments by the program
     SyscallIntegerOverflow,
 
-    /// An access of VirtAddr of usize bytes failed
-    ReadFault(VirtAddr, usize),
+    /// A write to `VirtAddr` failed due to missing permissions 
+    WriteFault(VirtAddr),
 }
+
 /// All the state of the emulated system
 pub struct Emulator {
     /// Memory for the emulator
@@ -64,7 +78,7 @@ impl Emulator {
         }
     }
 
-    pub fn run(&mut self) -> Option<VmExit> {
+    pub fn run(&mut self) -> Result<(), VmExit> {
         'next_inst: loop {
             // Get the current program counter
             let pc = self.reg(Register::Pc);
@@ -389,7 +403,7 @@ impl Emulator {
                 0b1110011 => {
                     if inst == 0b00000000000000000000000001110011 {
                         // ECALL
-                        return Some(VmExit::Syscall);
+                        return Err(VmExit::Syscall);
                     } else if inst == 0b00000000000100000000000001110011 {
                         // EBREAK
                         panic!("SYSCALL")
