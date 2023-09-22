@@ -6,6 +6,12 @@ use crate::mmu::{Mmu, Perm, VirtAddr, PERM_EXEC};
 pub enum VmExit {
     /// The VM exited due to a syscall instruction
     Syscall,
+
+    /// An integer overflow occured during a syscall due to bad supplied arguments by the program
+    SyscallIntegerOverflow,
+
+    /// An access of VirtAddr of usize bytes failed
+    ReadFault(VirtAddr, usize),
 }
 /// All the state of the emulated system
 pub struct Emulator {

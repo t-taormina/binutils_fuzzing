@@ -2,7 +2,7 @@ pub mod emulator;
 pub mod mmu;
 pub mod primitive;
 
-use crate::emulator::{Emulator, Register};
+use crate::emulator::{Emulator, Register, VmExit};
 use crate::mmu::{Perm, Section, VirtAddr, PERM_EXEC, PERM_READ, PERM_WRITE};
 
 fn main() {
@@ -74,7 +74,7 @@ fn main() {
     push!(argv.0); // Argv
     push!(1u64); // Argc
 
-    loop {
+    let vmexit = loop {
         let vmexit = emu.run().expect("Failed to execute emulator");
 
         match vmexit {
@@ -93,6 +93,22 @@ fn main() {
                     }
                     66 => {
                         //writev()
+                        let fd     = emu.reg(Register::A0);
+                        let iov    = emu.reg(Register::A1);
+                        let iovcnt = emu.reg(Register::A2);
+
+                        for idx in 0..iovcnt {
+                            let ptr = 16u64.checked_mul(idx)
+                                .and_then(|x| x.checked_add(idx))
+                                .and_then(|x| x.checked_add(15));
+                            if ptr.is_none() {
+                                break VmExit::SyscallIntegerOverflow;
+                            }
+                            let ptr = ptr.unwrap();
+                            let buf: u64 = emu.memory.read(VirtAddr(ptr + 0));
+                            let len: u64 = emu.memory.read(VirtAddr(ptr + 8));
+                        }
+
                     }
                     _ => {
                         panic!("unhandled syscall {}\n", num)
@@ -102,5 +118,6 @@ fn main() {
                 emu.set_reg(Register::Pc, pc.wrapping_add(4));
             }
         }
-    }
+    };
+    print!("VM exited with: {:?}\n", vmexit);
 }
