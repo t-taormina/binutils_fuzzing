@@ -8,6 +8,7 @@ pub const PERM_READ: u8 = 1 << 0;
 pub const PERM_WRITE: u8 = 1 << 1;
 pub const PERM_EXEC: u8 = 1 << 2;
 pub const PERM_RAW: u8 = 1 << 3;
+
 /// Block size used for resetting and tracking memory which has been modified
 /// The larger this is, the fewer but more expensive memcpys() need to occur,
 /// the smaller, the greater but less expensive memcpys() need to occur.

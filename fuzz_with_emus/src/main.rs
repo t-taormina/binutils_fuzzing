@@ -74,18 +74,25 @@ fn main() {
     push!(argv.0); // Argv
     push!(1u64); // Argc
 
-    let mut count = 0;
-
     loop {
         let vmexit = emu.run().expect("Failed to execute emulator");
 
         match vmexit {
             emulator::VmExit::Syscall => {
+                // Get the syscall number
                 let num = emu.reg(Register::A7);
 
                 match num {
                     96 => {
+                        // set_tid_address(), just return the TID
                         emu.set_reg(Register::A0, 1337);
+                    }
+                    29 => {
+                        // ioctl()
+                        emu.set_reg(Register::A0, !0);
+                    }
+                    66 => {
+                        //writev()
                     }
                     _ => {
                         panic!("unhandled syscall {}\n", num)
@@ -93,8 +100,6 @@ fn main() {
                 }
                 let pc = emu.reg(Register::Pc);
                 emu.set_reg(Register::Pc, pc.wrapping_add(4));
-                count += 1;
-                print!("\n\nloop counts: {}\n\n", count);
             }
         }
     }
