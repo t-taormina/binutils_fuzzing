@@ -2,6 +2,7 @@ pub mod emulator;
 pub mod mmu;
 pub mod primitive;
 
+use::std::time::Instant;
 use crate::emulator::{Emulator, Register, VmExit};
 use crate::mmu::{Perm, Section, VirtAddr, PERM_EXEC, PERM_READ, PERM_WRITE};
 
@@ -26,6 +27,15 @@ fn handle_syscall(emu: &mut Emulator) -> Result<(), VmExit> {
             let iov    = emu.reg(Register::A1);
             let iovcnt = emu.reg(Register::A2);
 
+            // We currently only handle stdout and stderr
+            if fd != 1 && fd != 2 {
+                // Return error
+                emu.set_reg(Register::A0, !0);
+                return Ok(());
+            }
+
+            let mut bytes_written = 0;
+
             for idx in 0..iovcnt {
                 // Compute the pointer to the IO vector entry 
                 // correspoinding to this index and validate that it 
@@ -45,9 +55,15 @@ fn handle_syscall(emu: &mut Emulator) -> Result<(), VmExit> {
                     Perm(PERM_READ))?;
 
                 if let Ok(st) = core::str::from_utf8(data) {
-                    print!("{}", st);
+                    //print!("{}", st);
                 }
+
+                // Update number of bytes written
+                bytes_written += len as u64;
             }
+
+            // Return number of bytes written
+            emu.set_reg(Register::A0, bytes_written);
             Ok(())
         }
         94 => {
@@ -128,19 +144,33 @@ fn main() {
     push!(argv.0); // Argv
     push!(1u64); // Argc
 
-    let vmexit = loop {
-        let vmexit = emu.run().expect_err("Failed to execute emulator");
-        match vmexit {
-            VmExit::Syscall => {
-                if let Err(vmexit) = handle_syscall(&mut emu) {
-                    break vmexit;
-                }
-                let pc = emu.reg(Register::Pc);
-                emu.set_reg(Register::Pc, pc.wrapping_add(4));
-            }
-            _ => break vmexit,
-        }
-    };
+    // Fork the VM
+    let mut worker = emu.fork();
 
-    print!("VM exited with: {:x?}\n", vmexit);
+    // Start a timer
+    let start = Instant::now();
+
+    for fuzz_cases in 1u64.. {
+        // Reset worker to original state
+        worker.reset(&emu);
+
+        let vmexit = loop {
+            let vmexit = worker.run().expect_err("Failed to execute emulator");
+            match vmexit {
+                VmExit::Syscall => {
+                    if let Err(vmexit) = handle_syscall(&mut worker) {
+                        break vmexit;
+                    }
+                    let pc = worker.reg(Register::Pc);
+                    worker.set_reg(Register::Pc, pc.wrapping_add(4));
+                }
+                _ => break vmexit,
+            }
+        };
+        if fuzz_cases & 0xffff == 0 {
+            let elapsed = start.elapsed().as_secs_f64();
+            print!("[{:10.4}] cases {:10} | fcps {:10.2}\n",
+                   elapsed, fuzz_cases, fuzz_cases as f64 / elapsed);
+        }
+    }
 }
