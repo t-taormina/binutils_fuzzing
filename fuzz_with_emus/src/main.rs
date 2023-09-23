@@ -2,9 +2,58 @@ pub mod emulator;
 pub mod mmu;
 pub mod primitive;
 
-use::std::time::Instant;
+use::std::sync::{Arc, Mutex};
+use::std::time::{Duration, Instant};
 use crate::emulator::{Emulator, Register, VmExit};
 use crate::mmu::{Perm, Section, VirtAddr, PERM_EXEC, PERM_READ, PERM_WRITE};
+
+/// If `true` the guest writes to stdout and stdout adn stderr will printed to
+/// our own stdout and stderr
+const VERBOSE_GUEST_PRINTS: bool = false;
+
+fn rdtsc() -> u64 {
+    unsafe { std::arch::x86_64::_rdtsc() }
+}
+
+/// Statistics during fuzzing
+#[derive(Default)]
+struct Statistics {
+    /// Number of fuzz cases
+    fuzz_cases: u64,
+}
+
+fn worker(mut emu: Emulator, original: Arc<Emulator>, 
+          stats: Arc<Mutex<Statistics>>) {
+    const BATCH_SIZE: usize = 10000;
+    loop {
+        let mut local_stats = Statistics::default();
+        // Reset worker to original state
+        for _ in 0..BATCH_SIZE {
+            emu.reset(&*original);
+
+            let _vmexit = loop {
+                let vmexit = emu.run()
+                    .expect_err("Failed to execute emulator");
+
+                match vmexit {
+                    VmExit::Syscall => {
+                        if let Err(vmexit) = handle_syscall(&mut emu) {
+                            break vmexit;
+                        }
+                        let pc = emu.reg(Register::Pc);
+                        emu.set_reg(Register::Pc, pc.wrapping_add(4));
+                    }
+                    _ => break vmexit,
+                }
+            };
+            local_stats.fuzz_cases += 1;
+
+        }
+
+        let mut stats = stats.lock().unwrap();
+        stats.fuzz_cases += local_stats.fuzz_cases;
+    }
+}
 
 fn handle_syscall(emu: &mut Emulator) -> Result<(), VmExit> {
     // Get the syscall number
@@ -54,8 +103,10 @@ fn handle_syscall(emu: &mut Emulator) -> Result<(), VmExit> {
                 let data = emu.memory.peek_perms(VirtAddr(buf), len,
                     Perm(PERM_READ))?;
 
-                if let Ok(st) = core::str::from_utf8(data) {
-                    //print!("{}", st);
+                if VERBOSE_GUEST_PRINTS {
+                    if let Ok(st) = core::str::from_utf8(data) {
+                        print!("{}", st);
+                    }
                 }
 
                 // Update number of bytes written
@@ -106,9 +157,6 @@ fn main() {
         )
         .expect("Failed to load test application into address space");
 
-    // let tmp = emu.memory.allocate(4).unwrap();
-    // emu.memory.write_from(tmp, b"asdf").unwrap();
-
     // Set the program entry point
     emu.set_reg(Register::Pc, 0x11190);
 
@@ -129,10 +177,14 @@ fn main() {
 
     macro_rules! push {
         ($expr:expr) => {
-            let sp = emu.reg(Register::Sp) - core::mem::size_of_val(&$expr) as u64;
+            let sp = 
+                emu.reg(Register::Sp) - core::mem::size_of_val(&$expr)
+                as u64;
+
             emu.memory
                 .write(VirtAddr(sp as usize), $expr)
                 .expect("Push failed");
+
             emu.set_reg(Register::Sp, sp);
         };
     }
@@ -144,33 +196,43 @@ fn main() {
     push!(argv.0); // Argv
     push!(1u64); // Argc
 
-    // Fork the VM
-    let mut worker = emu.fork();
+    // Wrap the original emulator in an `Arc`
+    let emu = Arc::new(emu);
+
+    let stats = Arc::new(Mutex::new(Statistics::default()));
+    
+    // Change cores here
+    let number_of_cores = 16;
+
+    for _ in 0..number_of_cores {
+        let new_emu = emu.fork();
+        let stats   = stats.clone();
+        let parent  = emu.clone();
+        std::thread::spawn(move || {
+            worker(new_emu, parent, stats);
+        });
+    }
 
     // Start a timer
     let start = Instant::now();
 
-    for fuzz_cases in 1u64.. {
-        // Reset worker to original state
-        worker.reset(&emu);
+    // Save the time stamp of start of execution
+    let start_cycles = rdtsc();
 
-        let vmexit = loop {
-            let vmexit = worker.run().expect_err("Failed to execute emulator");
-            match vmexit {
-                VmExit::Syscall => {
-                    if let Err(vmexit) = handle_syscall(&mut worker) {
-                        break vmexit;
-                    }
-                    let pc = worker.reg(Register::Pc);
-                    worker.set_reg(Register::Pc, pc.wrapping_add(4));
-                }
-                _ => break vmexit,
-            }
-        };
-        if fuzz_cases & 0xffff == 0 {
-            let elapsed = start.elapsed().as_secs_f64();
-            print!("[{:10.4}] cases {:10} | fcps {:10.2}\n",
-                   elapsed, fuzz_cases, fuzz_cases as f64 / elapsed);
-        }
+    let mut last_cases = 0;
+
+    loop {
+        std::thread::sleep(Duration::from_millis(1000));
+
+        // Access stats structure
+        let stats = stats.lock().unwrap();
+
+        let elapsed = start.elapsed().as_secs_f64();
+
+        let fuzz_cases = stats.fuzz_cases;
+        print!("[{:10.4}] cases {:10} | fcps {:10.2}\n",
+               elapsed, fuzz_cases, fuzz_cases - last_cases);
+
+        last_cases = fuzz_cases;
     }
 }
