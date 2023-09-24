@@ -20,20 +20,40 @@ fn rdtsc() -> u64 {
 struct Statistics {
     /// Number of fuzz cases
     fuzz_cases: u64,
+
+    /// Number of RISC-V instructions executed
+    instrs_execed: u64,
+
+    /// Total number of CPU cycles spent in the workers
+    total_cycles: u64,
+
+    /// Total number of CPU cycles spent resetting the guest
+    reset_cycles: u64,
+
+    /// Total number of CPU cycles spent emulating
+    vm_cycles: u64,
 }
 
 fn worker(mut emu: Emulator, original: Arc<Emulator>, 
           stats: Arc<Mutex<Statistics>>) {
     const BATCH_SIZE: usize = 10000;
     loop {
+        // Start a timer
+        let batch_start = rdtsc();
+
         let mut local_stats = Statistics::default();
+
         // Reset worker to original state
         for _ in 0..BATCH_SIZE {
+            let it = rdtsc();
             emu.reset(&*original);
+            local_stats.reset_cycles += rdtsc() - it;
 
             let _vmexit = loop {
-                let vmexit = emu.run()
+                let it = rdtsc();
+                let vmexit = emu.run(&mut local_stats.instrs_execed)
                     .expect_err("Failed to execute emulator");
+                local_stats.vm_cycles += rdtsc() - it;
 
                 match vmexit {
                     VmExit::Syscall => {
@@ -46,12 +66,21 @@ fn worker(mut emu: Emulator, original: Arc<Emulator>,
                     _ => break vmexit,
                 }
             };
-            local_stats.fuzz_cases += 1;
 
+            local_stats.fuzz_cases += 1;
         }
 
+        // Get access to statistics
         let mut stats = stats.lock().unwrap();
-        stats.fuzz_cases += local_stats.fuzz_cases;
+
+        stats.fuzz_cases    += local_stats.fuzz_cases;
+        stats.instrs_execed += local_stats.instrs_execed;
+        stats.reset_cycles  += local_stats.reset_cycles;
+        stats.vm_cycles     += local_stats.vm_cycles;
+
+        // Compute amount of time during the batch
+        let batch_elapsed    = rdtsc() - batch_start;
+        stats.total_cycles  += batch_elapsed;
     }
 }
 
@@ -202,7 +231,7 @@ fn main() {
     let stats = Arc::new(Mutex::new(Statistics::default()));
     
     // Change cores here
-    let number_of_cores = 16;
+    let number_of_cores = 10;
 
     for _ in 0..number_of_cores {
         let new_emu = emu.fork();
@@ -216,11 +245,8 @@ fn main() {
     // Start a timer
     let start = Instant::now();
 
-    // Save the time stamp of start of execution
-    let start_cycles = rdtsc();
-
     let mut last_cases = 0;
-
+    let mut last_instrs = 0;
     loop {
         std::thread::sleep(Duration::from_millis(1000));
 
@@ -230,9 +256,19 @@ fn main() {
         let elapsed = start.elapsed().as_secs_f64();
 
         let fuzz_cases = stats.fuzz_cases;
-        print!("[{:10.4}] cases {:10} | fcps {:10.2}\n",
-               elapsed, fuzz_cases, fuzz_cases - last_cases);
+        let instrs = stats.instrs_execed;
+
+        // Compute performance numbers
+        let resetc = stats.reset_cycles as f64 / stats.total_cycles as f64;
+        let vmc    = stats.vm_cycles    as f64 / stats.total_cycles as f64;
+
+        print!("[{:10.4}] cases {:10} | fcps {:10} inst/sec {:10}\n\
+                    reset {:8.4} | vm {:8.4}\n",
+               elapsed, fuzz_cases, fuzz_cases - last_cases, 
+               instrs - last_instrs, 
+               resetc, vmc);
 
         last_cases = fuzz_cases;
+        last_instrs = instrs;
     }
 }
