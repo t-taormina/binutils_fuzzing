@@ -7,7 +7,7 @@ use::std::time::{Duration, Instant};
 use crate::emulator::{Emulator, Register, VmExit};
 use crate::mmu::{Perm, Section, VirtAddr, PERM_EXEC, PERM_READ, PERM_WRITE};
 
-/// If `true` the guest writes to stdout and stdout adn stderr will printed to
+/// If `true` the guest writes to stdout and stdout and stderr will printed to
 /// our own stdout and stderr
 const VERBOSE_GUEST_PRINTS: bool = false;
 

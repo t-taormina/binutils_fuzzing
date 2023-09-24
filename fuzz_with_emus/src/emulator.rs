@@ -92,8 +92,9 @@ impl Emulator {
 
             // Extract opcode from instruction (Bits 0-6)
             let opcode = inst & 0b1111111;
-            //print!("PC: {:#x} | opcode: {:b}\n", pc, opcode);
 
+            // Written from the top down more or less based on the docs
+            // https://riscv.org/wp-content/uploads/2017/05/riscv-spec-v2.2.pdf
             match opcode {
                 0b0110111 => {
                     // LUI (Load upper immediate)
@@ -103,13 +104,15 @@ impl Emulator {
                 0b0010111 => {
                     // AUIPC (Add upper immediate PC)
                     let inst = UType::from(inst);
-                    self.set_reg(inst.rd, (inst.imm as i64 as u64).wrapping_add(pc));
+                    self.set_reg(inst.rd,
+                                 (inst.imm as i64 as u64).wrapping_add(pc));
                 }
                 0b1101111 => {
                     // JAL (Jump and Link)
                     let inst = JType::from(inst);
                     self.set_reg(inst.rd, pc.wrapping_add(4));
-                    self.set_reg(Register::Pc, pc.wrapping_add(inst.imm as i64 as u64));
+                    self.set_reg(Register::Pc,
+                                 pc.wrapping_add(inst.imm as i64 as u64));
                     continue 'next_inst;
                 }
                 0b1100111 => {
@@ -118,7 +121,8 @@ impl Emulator {
                     match inst.funct3 {
                         0b000 => {
                             // JALR (Jump and Link Register)
-                            let target = self.reg(inst.rs1).wrapping_add(inst.imm as i64 as u64);
+                            let target = self.reg(inst.rs1)
+                                .wrapping_add(inst.imm as i64 as u64);
                             self.set_reg(inst.rd, pc.wrapping_add(4));
                             self.set_reg(Register::Pc, target);
                             continue 'next_inst;
@@ -136,42 +140,55 @@ impl Emulator {
                         0b000 => {
                             // BEQ (Branch Equal)
                             if rs1 == rs2 {
-                                self.set_reg(Register::Pc, pc.wrapping_add(inst.imm as i64 as u64));
+                                self.set_reg(Register::Pc,
+                                             pc.wrapping_add(
+                                                 inst.imm as i64 as u64));
                                 continue 'next_inst;
                             }
                         }
                         0b001 => {
                             // BNE (Branch Not Equal)
                             if rs1 != rs2 {
-                                self.set_reg(Register::Pc, pc.wrapping_add(inst.imm as i64 as u64));
+                                self.set_reg(Register::Pc,
+                                             pc.wrapping_add(
+                                                 inst.imm as i64 as u64));
                                 continue 'next_inst;
                             }
                         }
                         0b100 => {
                             // BLT (Branch if less than)
                             if (rs1 as i64) < (rs2 as i64) {
-                                self.set_reg(Register::Pc, pc.wrapping_add(inst.imm as i64 as u64));
+                                self.set_reg(Register::Pc,
+                                             pc.wrapping_add(
+                                                 inst.imm as i64 as u64));
                                 continue 'next_inst;
                             }
                         }
                         0b101 => {
                             // BGE (Branch if greater than or equal to)
                             if (rs1 as i64) >= (rs2 as i64) {
-                                self.set_reg(Register::Pc, pc.wrapping_add(inst.imm as i64 as u64));
+                                self.set_reg(Register::Pc,
+                                             pc.wrapping_add(
+                                                 inst.imm as i64 as u64));
                                 continue 'next_inst;
                             }
                         }
                         0b110 => {
                             // BLTU (Branch if less than unsigned)
                             if (rs1 as u64) < (rs2 as u64) {
-                                self.set_reg(Register::Pc, pc.wrapping_add(inst.imm as i64 as u64));
+                                self.set_reg(Register::Pc,
+                                             pc.wrapping_add(
+                                                 inst.imm as i64 as u64));
                                 continue 'next_inst;
                             }
                         }
                         0b111 => {
-                            // BGEU (Branch if greater than or equal to unsigned)
+                            // BGEU (Branch if greater than or
+                            // equal to unsigned)
                             if (rs1 as u64) >= (rs2 as u64) {
-                                self.set_reg(Register::Pc, pc.wrapping_add(inst.imm as i64 as u64));
+                                self.set_reg(Register::Pc,
+                                             pc.wrapping_add(
+                                                 inst.imm as i64 as u64));
                                 continue 'next_inst;
                             }
                         }
@@ -183,50 +200,59 @@ impl Emulator {
                     let inst = IType::from(inst);
 
                     let addr =
-                        VirtAddr(self.reg(inst.rs1).wrapping_add(inst.imm as i64 as u64) as usize);
+                        VirtAddr(self.reg(inst.rs1)
+                                 .wrapping_add(
+                                     inst.imm as i64 as u64) as usize);
 
                     match inst.funct3 {
                         0b000 => {
                             // LB (Load Byte)
                             let mut tmp = [0u8; 1];
                             self.memory.read_into(addr, &mut tmp)?;
-                            self.set_reg(inst.rd, i8::from_le_bytes(tmp) as i64 as u64);
+                            self.set_reg(inst.rd,
+                                         i8::from_le_bytes(tmp) as i64 as u64);
                         }
                         0b001 => {
                             // LH (Load Half word)
                             let mut tmp = [0u8; 2];
                             self.memory.read_into(addr, &mut tmp)?;
-                            self.set_reg(inst.rd, i16::from_le_bytes(tmp) as i64 as u64);
+                            self.set_reg(inst.rd,
+                                         i16::from_le_bytes(tmp) as i64 as u64);
                         }
                         0b010 => {
                             // LW (Load Word)
                             let mut tmp = [0u8; 4];
                             self.memory.read_into(addr, &mut tmp)?;
-                            self.set_reg(inst.rd, i32::from_le_bytes(tmp) as i64 as u64);
+                            self.set_reg(inst.rd,
+                                         i32::from_le_bytes(tmp) as i64 as u64);
                         }
                         0b011 => {
                             // LD (Load double word)
                             let mut tmp = [0u8; 8];
                             self.memory.read_into(addr, &mut tmp)?;
-                            self.set_reg(inst.rd, i64::from_le_bytes(tmp) as i64 as u64);
+                            self.set_reg(inst.rd,
+                                         i64::from_le_bytes(tmp) as i64 as u64);
                         }
                         0b100 => {
                             // LBU (Load byte unsigned)
                             let mut tmp = [0u8; 1];
                             self.memory.read_into(addr, &mut tmp)?;
-                            self.set_reg(inst.rd, u8::from_le_bytes(tmp) as u64);
+                            self.set_reg(inst.rd,
+                                         u8::from_le_bytes(tmp) as u64);
                         }
                         0b101 => {
                             // LHU (Load half-word unsigned)
                             let mut tmp = [0u8; 2];
                             self.memory.read_into(addr, &mut tmp)?;
-                            self.set_reg(inst.rd, u16::from_le_bytes(tmp) as u64);
+                            self.set_reg(inst.rd,
+                                         u16::from_le_bytes(tmp) as u64);
                         }
                         0b110 => {
                             // LWU (Load word unsigned)
                             let mut tmp = [0u8; 4];
                             self.memory.read_into(addr, &mut tmp)?;
-                            self.set_reg(inst.rd, u32::from_le_bytes(tmp) as u64);
+                            self.set_reg(inst.rd,
+                                         u32::from_le_bytes(tmp) as u64);
                         }
                         _ => unimplemented!("unexpected 0b0000011"),
                     }
@@ -235,7 +261,8 @@ impl Emulator {
                     // SType
                     let inst = SType::from(inst);
                     let addr =
-                        VirtAddr(self.reg(inst.rs1).wrapping_add(inst.imm as i64 as u64) as usize);
+                        VirtAddr(self.reg(inst.rs1).
+                                 wrapping_add(inst.imm as i64 as u64) as usize);
 
                     match inst.funct3 {
                         0b000 => {
@@ -324,7 +351,8 @@ impl Emulator {
                                 0b010000 => {
                                     // SRAI
                                     let shamt = inst.imm & 0b111111;
-                                    self.set_reg(inst.rd, ((rs1 as i64) >> shamt) as u64);
+                                    self.set_reg(inst.rd,
+                                                 ((rs1 as i64) >> shamt) as u64);
                                 }
                                 _ => unimplemented!("unexpected 0b101"),
                             }
@@ -381,7 +409,8 @@ impl Emulator {
                         (0b0100000, 0b101) => {
                             // SRA
                             let shamt = rs2 & 0b111111;
-                            self.set_reg(inst.rd, ((rs1 as i64) >> shamt) as u64);
+                            self.set_reg(inst.rd,
+                                         ((rs1 as i64) >> shamt) as u64);
                         }
                         (0b0000000, 0b110) => {
                             // OR
@@ -424,7 +453,9 @@ impl Emulator {
                     match inst.funct3 {
                         0b000 => {
                             // ADDIW
-                            self.set_reg(inst.rd, rs1.wrapping_add(imm) as i32 as i64 as u64);
+                            self.set_reg(inst.rd,
+                                         rs1
+                                         .wrapping_add(imm) as i32 as i64 as u64);
                         }
                         0b001 => {
                             let mode = (inst.imm >> 5) & 0b1111111;
@@ -432,7 +463,8 @@ impl Emulator {
                                 0b0000000 => {
                                     // SLLIW
                                     let shamt = inst.imm & 0b11111;
-                                    self.set_reg(inst.rd, (rs1 << shamt) as i32 as i64 as u64);
+                                    self.set_reg(inst.rd,
+                                                 (rs1 << shamt) as i32 as i64 as u64);
                                 }
                                 _ => unreachable!(),
                             }
@@ -444,12 +476,14 @@ impl Emulator {
                                 0b000000 => {
                                     // SRLIW
                                     let shamt = inst.imm & 0b11111;
-                                    self.set_reg(inst.rd, (rs1 >> shamt) as i32 as i64 as u64);
+                                    self.set_reg(inst.rd,
+                                                 (rs1 >> shamt) as i32 as i64 as u64);
                                 }
                                 0b010000 => {
                                     // SRAIW
                                     let shamt = inst.imm & 0b11111;
-                                    self.set_reg(inst.rd, ((rs1 as i32) >> shamt) as i64 as u64);
+                                    self.set_reg(inst.rd,
+                                                 ((rs1 as i32) >> shamt) as i64 as u64);
                                 }
                                 _ => unimplemented!("unexpected 0b101"),
                             }
