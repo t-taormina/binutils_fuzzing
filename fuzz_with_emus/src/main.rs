@@ -1,3 +1,6 @@
+/// Program drive for snapshot fuzzing using a RISC-V emulator that implements 
+/// just the basic instructions. No atomics, multiplies, or divides
+
 pub mod emulator;
 pub mod mmu;
 pub mod primitive;
@@ -14,7 +17,6 @@ const VERBOSE_GUEST_PRINTS: bool = false;
 fn rdtsc() -> u64 {
     unsafe { std::arch::x86_64::_rdtsc() }
 }
-
 /// Statistics during fuzzing
 #[derive(Default)]
 struct Statistics {
@@ -34,7 +36,7 @@ struct Statistics {
     vm_cycles: u64,
 }
 
-fn worker(mut emu: Emulator, original: Arc<Emulator>, 
+fn worker(mut emu: Emulator, original: Arc<Emulator>,
           stats: Arc<Mutex<Statistics>>) {
     const BATCH_SIZE: usize = 10000;
     loop {
@@ -253,10 +255,9 @@ fn main() {
         // Access stats structure
         let stats = stats.lock().unwrap();
 
-        let elapsed = start.elapsed().as_secs_f64();
-
+        let elapsed    = start.elapsed().as_secs_f64();
         let fuzz_cases = stats.fuzz_cases;
-        let instrs = stats.instrs_execed;
+        let instrs     = stats.instrs_execed;
 
         // Compute performance numbers
         let resetc = stats.reset_cycles as f64 / stats.total_cycles as f64;
